@@ -1,0 +1,433 @@
+---
+title: "SmallDataFrame"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+# Data Manipulation
+
+Setting up the working environment
+
+```{r}
+library(austraits) 
+library(tidyverse) 
+library(plotly) 
+library(ranger)
+
+austraits <- readRDS('austraits-0e1c08b0.rds')
+
+data<- austraits$traits
+```
+
+## Trait Coverage
+
+## Subset of Data
+
+Create a data frame with numerical values taking the average value across traits per species.
+
+```{r}
+ #Join the two datasets after turning lwa to numeric LWAH 
+ LWAH <- data %>%
+   select(taxon_name, trait_name, value) %>%
+   filter(trait_name %in% c('leaf_area', 'leaf_length', 'leaf_width', 'plant_height')) %>% 
+   mutate(value = as.numeric(value))%>%
+   group_by(taxon_name, trait_name) %>% 
+   summarise(avg_value = mean(value)) %>%
+   pivot_wider(names_from = trait_name, values_from = avg_value)%>%
+   na.omit()
+```
+
+Function to extract the most frequently recorded observation per species for categorical trait variables.
+
+```{r}
+most_frequent_character<-function(column_data) {
+  if (!is.vector(column_data) || !all(is.character(column_data))){
+    stop('input must be a vector of characters.')
+  }
+  char_counts <- table(column_data)
+  max_counts <- max(char_counts)
+  most_frequent_char <- names(char_counts[char_counts==max_counts])
+  return(most_frequent_char[1])  #first value 
+}
+```
+
+Creating a data frame with the categorical variables of interest
+
+```{r}
+high_coverage_cat <- data %>%
+  select(taxon_name, trait_name, value)%>% 
+  filter(trait_name %in% c('plant_growth_form', 'woodiness_detailed','life_history','leaf_shape'))%>%
+  group_by(taxon_name, trait_name)%>%
+  summarise(value=most_frequent_character(value))%>%
+  pivot_wider(names_from = trait_name, values_from = value)
+
+```
+
+Family Data
+
+```{r}
+family_data <- austraits$taxa %>% select(taxon_name, family)
+```
+
+Joining numerical, categorical, and family variables together
+
+```{r}
+lwa_subset <- left_join(LWAH, high_coverage_cat, by="taxon_name")%>% 
+  distinct(taxon_name, .keep_all = TRUE)
+
+lwa_subset <- left_join(lwa_subset, family_data, by="taxon_name")%>% 
+  distinct(taxon_name, .keep_all = TRUE)%>% 
+  rename('fam'='family')%>%
+  mutate(LxW = leaf_length*leaf_width)%>%
+  na.omit
+
+```
+
+# Data Cleaning
+
+## Base Plot Command
+
+```{r}
+#Main Plotting command with 1:1 line
+ggplot(lwa_subset, aes(LxW, leaf_area))+ 
+  geom_point()+ 
+  ggtitle("Relationship between Leaf Area and Length and Width")+
+  scale_x_log10()+ 
+  scale_y_log10()+ 
+  xlab('Log of Length x Width') + 
+  ylab('Log of Leaf Area')+ 
+  theme_classic()+
+  geom_abline(intercept=0, slope=1, col='red')
+
+#Plotting Linear Model
+ggplot(lwa_subset, aes(LxW, leaf_area)) + geom_point()+ 
+  geom_smooth(method='lm', col='blue')+ #adds abline from the linear model 
+  annotate('text', x=1, y=1e5, label='R2=0.76525')+ 
+  annotate('text', x=1, y=17500, label='p<2.2e6')+ 
+  ggtitle("Relationship between Leaf Area and Leaf Length and Width")+
+  scale_x_log10()+ 
+  scale_y_log10()+ 
+  xlab('log of leaf length x leaf width') + 
+  ylab('log of leaf area')+ 
+  geom_abline(intercept=0, slope=1, col='red')+
+  theme_classic()
+```
+
+## Linear Model Area \~ LxW and Residuals + Interactive Plot
+
+```{r}
+lwa_model <- lm(log(leaf_area) ~ log(LxW), lwa_subset) 
+
+#normalizing the mean and residuals 
+std.resid <- (lwa_model$residuals - mean(lwa_model$residuals))/sd(lwa_model$residuals)
+
+#plotting the standardized residuals 
+plot(std.resid) 
+hist(std.resid)
+
+#put residuals into the dataset 
+lwa_subset$residuals <- std.resid
+
+#outlier species with residuals 2 standard deviations away from the mean
+outliers <- lwa_subset %>% filter (residuals > 2| residuals < -2)
+
+#to take out these species if necessary 
+lwa_subset_trimmed <- lwa_subset %>% filter (residuals < 2 & residuals > -2)
+
+#interactive plot to look at outlier species
+p <- ggplot(lwa_subset, aes(LxW, leaf_area, label=taxon_name)) + 
+  geom_point()+ 
+  ggtitle("Species Residuals >2 or <-2")+ 
+  scale_x_log10()+ scale_y_log10()+ 
+  xlab('log of leaf length x leaf width') + ylab('log of leaf area')+ geom_abline(intercept=0, slope=1, col='red')+ 
+  geom_point(data=lwa_subset 
+             %>% filter(taxon_name %in% outliers$taxon_name), col='orange')+ 
+  theme_classic() 
+ggplotly()
+```
+
+## Outlier Plots 
+
+### Case Study:Examining Acacia baileyana and Fabacea Family
+
+```{r}
+ggplot(lwa_subset, aes(LxW, leaf_area)) + 
+  geom_point()+ 
+  ggtitle("Relationship between Leaf Area and Leaf Length and Width\n Acacia")+
+  scale_x_log10()+ 
+  scale_y_log10()+ 
+  xlab('log of leaf length x leaf width') + 
+  ylab('log of leaf area')+ 
+  geom_abline(intercept=0, slope=1, col='red')+ 
+  theme_classic()+
+  geom_point(data=lwa_subset %>% 
+               filter(grepl('Fabaceae', fam)), col='orange')+ geom_point(data=lwa_subset %>% filter(taxon_name=='Acacia baileyana'), col='pink')
+
+#view all observations of this species; let us know that there might be a difference between how they measured area and length/width data %>% filter(taxon_name == 'Acacia baileyana', trait_name %in% c('leaf_length', 'leaf_width', 'leaf_area')) %>% view() #A.baileyana is a species with compound leaves where it looks like the soruce measured the leaflet for leaf width/length and the entire leaf for leaf area.
+
+austraits$sources[["Maslin_2012"]]
+```
+
+### Compound vs. simple leaf plots
+
+```{r}
+ #a dataframe with taxon name and leaf compoundness value per species 
+compound_avg <- data %>% 
+  select(taxon_name, trait_name, value) %>% 
+  filter(trait_name == 'leaf_compoundness') %>% 
+  select(taxon_name, value ) 
+colnames(compound_avg) <-c('taxon_name', 'leaf_compoundness')
+
+#joining the leaf compoundness values to the lwa subset dataframe 
+lwa_subset <- left_join(lwa_subset, compound_avg, by = "taxon_name") %>% distinct(taxon_name, .keep_all = TRUE)
+
+#Plotting Area vs LW highlighting compound leaves 
+ggplot(lwa_subset, aes(LxW, leaf_area)) + geom_point()+
+  ggtitle("Leaf Area vs LxW + Compound")+ 
+  scale_x_log10()+ 
+  scale_y_log10()+ 
+  xlab('log of leaf length x leaf width') + 
+  ylab('log of leaf area')+ 
+  geom_abline(intercept=0, slope=1, col='red')+ 
+  geom_point(data=lwa_subset %>% filter(leaf_compoundness=='compound'), col='orange')+ theme_classic()
+
+#Plotting Area vs. LW highlighting simple leaves 
+ggplot(lwa_subset, aes(LxW, leaf_area)) + 
+  geom_point()+ 
+  ggtitle("Leaf Area vs LxW + Simple")+
+  scale_x_log10()+ 
+  scale_y_log10()+ 
+  xlab('log of leaf length x leaf width') + 
+  ylab('log of leaf area')+ 
+  geom_abline(intercept=0, slope=1, col='red')+
+  geom_point(data=lwa_subset %>% filter(leaf_compoundness=='simple'), col='orange')+ 
+  theme_classic()
+```
+
+### Families
+
+Create a loop to make a plot for each family highlighting species in the family
+
+```{r}
+#distinct family names 
+distinct_families <- unique(lwa_subset$fam)
+
+#folder path to save plots
+folder_path <- 'C:/Users/lizzi/OneDrive/Documents/GitHub/bees3041_austraints2/FamilyPlots' 
+dir.create(folder_path, showWarnings = FALSE)
+
+#A loop to make a plot highlighting each family over the LWA subset? 
+for(family in distinct_families){ 
+  p<-ggplot(lwa_subset, aes(LxW, leaf_area))+ 
+    geom_point()+ 
+    ggtitle(paste('Area vs. LxW +',family))+ 
+    scale_x_log10()+ 
+    scale_y_log10()+
+    xlab('log of leaf length x leaf width') + 
+    ylab('log of leaf area')+
+    theme_classic()+ 
+    geom_abline(intercept=0, slope=1, col='red')+
+    geom_point(data=lwa_subset %>% filter(fam==family), col='orange') 
+  
+  file_name <- paste0(folder_path, '/', family, '_plot.png') 
+  ggsave(file_name, p, width=6, height=4) }
+```
+
+### Interactive Family Plot
+
+```{r}
+p <- ggplot(lwa_subset, aes(LxW, leaf_area, label=fam)) + 
+  geom_point()+ 
+  ggtitle("Leaf Area vs LxW + Compound")+ 
+  scale_x_log10()+ 
+  scale_y_log10()+
+  xlab('log of leaf length x leaf width') + ylab('log of leaf area')+
+  geom_abline(intercept=0, slope=1, col='red')+ 
+  theme_classic()
+ggplotly(p)
+```
+
+### Leaf Shape
+
+```{r}
+#how many unique shape names
+distinct_shape <- unique(lwa_subset$leaf_shape)
+
+#creating a folder path and directory
+folder_path <- 'C:/Users/lizzi/OneDrive/Documents/1. UNSW/Term 2 2023/BEES9041/DansProject/ShapePlots'
+
+dir.create(folder_path, showWarnings = FALSE)
+
+#For loop to create a plot per leaf shpae and save it to folder 
+for(shape in distinct_shape){ 
+  p<-ggplot(lwa_subset, aes(LxW, leaf_area))+ 
+    geom_point()+ 
+    ggtitle(paste('Area vs. LxW +',shape))+ 
+    scale_x_log10()+ scale_y_log10()+ 
+    xlab('log of leaf length x leaf width') +
+    ylab('log of leaf area')+ 
+    theme_classic()+ 
+    geom_abline(intercept=0, slope=1, col='red')+ 
+    geom_point(data=lwa_subset %>% filter(leaf_shape==shape), col='orange')
+  
+file_name <- paste0(folder_path, '/', shape, '_plot.png') ggsave(file_name, p, width=6, height=4) }
+
+```
+
+# Testing Models
+
+```{r}
+#bring in function 
+source('C:/Users/lizzi/OneDrive/Documents/GitHub/bees3041_austraits2/evaluation.R')
+```
+
+## Fitting the Dataframe for Ranger
+
+```{r}
+#prep lwa subset by log transforming numerical variables 
+lwa_subset <- lwa_subset %>%
+  ungroup() %>%
+  select(-taxon_name)%>%
+  mutate(LxW =leaf_length*leaf_width)%>%  #create LxW column
+  na.omit() %>%
+  mutate(LxW=leaf_length*leaf_width)%>%
+  mutate(logLxW = log(LxW)) %>%
+  mutate(log_area = log(leaf_area))%>%
+  mutate(log_length = log(leaf_length))%>%
+  mutate(log_width = log(leaf_width))%>%
+  mutate(log_height = log(plant_height))
+
+
+#subset data
+set.seed(125)
+sample <- sample(nrow(lwa_subset), 0.75*nrow(lwa_subset))
+data_train <- lwa_subset[sample,]
+data_test <- lwa_subset[-sample,]
+```
+
+## Running the Models 
+
+Basic ranger command:
+
+fit \<- ranger(log_area \~ \<covariates\>, data=data_train
+
+### Evaluate my model function giving training and testing plots 
+
+```{r}
+evaluate_my_model <- function(fit, data_train, data_test, ...) {
+  # customise prediction function for different methods
+  if("ranger" %in% class(fit))
+    pred <-  function(fit, data) predict(fit, data=data)$prediction
+   else if("lm" %in% class(fit))
+    pred <-  function(fit, data) predict(fit, newdata=data)
+   data_train <- data_train %>% mutate(group = "training",
+                                      predicted = pred(fit,data_train))
+  
+  # add out of sample predictions
+  data_test <- data_test %>%  mutate(group = "testing",
+                                     predicted =  pred(fit, data_test))
+  
+  # comnbine for plotting
+  data_pred <-  rbind(data_train, data_test)  %>%
+    mutate(
+      group = factor(group, levels = c("training", "testing"))
+    )
+  
+  # Calculate stats on model fit
+  model_stats <- 
+    data_pred %>% 
+    group_by(group) %>% 
+    summarise(
+      # Caluclate R2
+      r2 = cor(log_area, predicted)^2,
+      #Calculate RMSE
+      RMSE = sqrt(sum((log_area - predicted)^2)/n())
+    ) %>% 
+    ungroup() %>%
+    # for plotting
+    mutate(
+      # location to add on plot
+      x = 0, y=100,
+      # label to show
+      stats = paste0("RMSE = ", format(RMSE, digits=2), ", R2 =", format(r2, digits=2))
+    )
+  
+  # Make a plot
+  data_pred %>%
+    ggplot(aes(log_area, predicted)) +
+    # raw data
+    geom_point(col="darkgrey") +
+    # 1:1
+    geom_abline(intercept = 1, slope=1, linetype="dashed") +
+    # add stats
+    geom_text(data = model_stats, aes(x, y, label = stats), hjust=0, col="red",x=0,y=15) +
+    labs(x="Observed Y", y="Predicted Y") +
+    ylim(c(0,15)) + xlim(c(0, 15)) +
+    facet_wrap(~group) + theme_classic()
+}
+
+```
+
+### Evaluate my model function giving testing plots
+
+```{r}
+evaluate_my_model_testing <- function(fit, data_train, data_test, ...) {
+  # customise prediction function for different methods
+  if("ranger" %in% class(fit))
+    pred <-  function(fit, data) predict(fit, data=data)$prediction
+   else if("lm" %in% class(fit))
+    pred <-  function(fit, data) predict(fit, newdata=data)
+   data_train <- data_train %>% mutate(group = "training",
+                                      predicted = pred(fit,data_train))
+  
+  # add out of sample predictions
+  data_test <- data_test %>%  mutate(group = "testing",
+                                     predicted =  pred(fit, data_test))
+  
+  # comnbine for plotting
+  data_pred <-  rbind(data_train, data_test)  %>%
+    mutate(
+      group = factor(group, levels = c("training", "testing"))
+    )
+  
+  # Calculate stats on model fit
+  model_stats <- 
+    data_pred %>% 
+    group_by(group) %>% 
+    summarise(
+      # Caluclate R2
+      r2 = cor(log_area, predicted)^2,
+      #Calculate RMSE
+      RMSE = sqrt(sum((log_area - predicted)^2)/n())
+    ) %>% 
+    ungroup() %>%
+    # for plotting
+    mutate(
+      # location to add on plot
+      x = 0, y=100,
+      # label to show
+      stats = paste0("RMSE = ", format(RMSE, digits=2), ", R2 =", format(r2, digits=2))
+    )
+  
+  # Make a plot
+ggplot(data=data_pred%>%filter(group=='testing'),aes(log_area, predicted)) +
+    # raw data
+    geom_point(col="darkgrey") +
+    # 1:1
+    geom_abline(intercept = 1, slope=1, linetype="dashed") +
+    # add stats
+    geom_text(data = model_stats%>%filter(group=='testing'), aes(x, y, label = stats), hjust=0, col="red", x=0,y=15) +
+    labs(x="Observed Y", y="Predicted Y") +
+    ylim(c(0,15)) + xlim(c(0, 15)) +
+    theme_classic()
+}
+```
+
+```{r}
+fit <- ranger(log_area ~ plant_growth_form+life_history+woodiness_detailed, data=data_train)
+
+evaluate_my_model(fit, data_train, data_test)
+evaluate_my_model_testing(fit, data_train, data_test)
+```
