@@ -1,0 +1,4 @@
+FamilyPlots-Scatterplots highlighting species of a certain family
+ShapePlots - Scatterplots highlighint species with a certain leaf shape 
+Compoundness-Scatterplots highlighint species with a certain leaf compoundness
+TestingRMSEPlots - scatterplots of model performancy on testing data highlighting RMSE values
