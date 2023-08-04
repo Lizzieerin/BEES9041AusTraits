@@ -24,11 +24,6 @@ data<- austraits$traits
   
 ```
 
-## Trait Coverage
-
-```{r}
-write.csv(trait_counts_top100, 'C:/Users/lizzi/OneDrive/Documents/GitHub/bees3041_austraits2/top100traits.csv',row.names=FALSE)
-```
 
 ## Creating the Dataset 
 
