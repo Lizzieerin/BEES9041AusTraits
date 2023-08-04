@@ -8,7 +8,8 @@ editor_options:
 
 # Loading Packages and Libraries
 
-```{library(austraits)}
+```
+library(austraits)
 library(tidyverse) 
 library(plotly) 
 library(ranger)
@@ -88,7 +89,7 @@ lwa_subset <- left_join(lwa_subset, family_data, by="taxon_name")%>%
 #write.csv(lwa_subset, 'C:/Users/lizzi/OneDrive/Documents/GitHub/bees3041_austraits2/Model_Data.csv',row.names=FALSE)
 ```
 
-# Data Visualization General Data Trends
+# Data Visualization
 
 ## Initial Relationship
 
@@ -526,11 +527,10 @@ See Data Manipulation for creation of dataframe lwa_subset
 ## Fitting the Dataframes for Ranger
 
 ```{r}
-#prep lwa subset by log transforming numerical variables
+#prep lwa subset by log transforming numerical variables and removing taxon_name
 lwa_subset <- lwa_subset %>%
   ungroup() %>%
-  #select(-taxon_name)%>%
-  mutate(LxW =leaf_length*leaf_width)%>%  #create LxW column
+  select(-taxon_name)%>%
   na.omit() %>%
   mutate(LxW=leaf_length*leaf_width)%>%
   mutate(logLxW = log(LxW)) %>%
@@ -684,7 +684,7 @@ log_area ~ log_width
 log_area ~ log_height
 log_area ~ leaf_shape
 
-#length width and additions 
+#length+width and additions 
 log_area ~ LxW
 log_area ~ log_length*log_width
 log_area ~ log_length + log_width
